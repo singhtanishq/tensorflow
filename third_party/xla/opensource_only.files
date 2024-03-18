@@ -9,6 +9,8 @@ third_party/BUILD:
 third_party/__init__:.py
 third_party/compute_library/BUILD:
 third_party/compute_library/build_defs.bzl:
+third_party/cuda_redist_json_repo.bzl:
+third_party/cuda_repo.bzl:
 third_party/implib_so/BUILD:
 third_party/implib_so/get_symbols.py:
 third_party/implib_so/make_stub.py:

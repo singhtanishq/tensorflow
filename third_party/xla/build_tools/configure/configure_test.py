@@ -32,12 +32,10 @@ _COMPILER_OPTIONS = ("-Wno-sign-compare",)
 
 # CUDA specific paths and versions
 _CUDA_SPECIFIC_PATHS_AND_VERSIONS = {
-    "cublas_version": "12.3",
-    "cuda_toolkit_path": "/usr/local/cuda-12.2",
+    "cuda_version": "12.3",
     "cuda_compute_capabilities": ["7.5"],
     "cudnn_version": "8",
     "ld_library_path": "/usr/local/nvidia/lib:/usr/local/nvidia/lib64",
-    "nccl_version": "2",
 }
 
 
@@ -75,7 +73,6 @@ class ConfigureTest(absltest.TestCase):
         compiler_options=list(_COMPILER_OPTIONS),
         cuda_compiler=CudaCompiler.NVCC,
         using_nccl=False,
-        using_tensorrt=False,
     )
 
     bazelrc_lines = config.to_bazelrc_lines(
@@ -97,7 +94,6 @@ class ConfigureTest(absltest.TestCase):
         compiler_options=list(_COMPILER_OPTIONS),
         cuda_compiler=CudaCompiler.NVCC,
         using_nccl=False,
-        using_tensorrt=False,
     )
 
     bazelrc_lines = config.to_bazelrc_lines(
@@ -118,7 +114,6 @@ class ConfigureTest(absltest.TestCase):
         compiler_options=list(_COMPILER_OPTIONS),
         cuda_compiler=CudaCompiler.CLANG,
         using_nccl=False,
-        using_tensorrt=False,
     )
 
     bazelrc_lines = config.to_bazelrc_lines(
@@ -140,7 +135,6 @@ class ConfigureTest(absltest.TestCase):
         compiler_options=list(_COMPILER_OPTIONS),
         cuda_compiler=CudaCompiler.NVCC,
         using_nccl=False,
-        using_tensorrt=False,
     )
 
     bazelrc_lines = config.to_bazelrc_lines(
@@ -162,7 +156,6 @@ class ConfigureTest(absltest.TestCase):
         compiler_options=list(_COMPILER_OPTIONS),
         cuda_compiler=CudaCompiler.NVCC,
         using_nccl=False,
-        using_tensorrt=False,
     )
 
     bazelrc_lines = config.to_bazelrc_lines(

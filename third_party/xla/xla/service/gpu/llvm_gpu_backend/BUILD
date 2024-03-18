@@ -7,7 +7,11 @@ load(
     "if_cuda_is_configured",
 )
 load("//xla:xla.bzl", "xla_cc_test")
-load("//xla/tsl:tsl.bzl", "internal_visibility")
+load(
+    "//xla/tsl:tsl.bzl",
+    "if_hermetic_cuda_tools",
+    "internal_visibility",
+)
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -32,6 +36,9 @@ cc_library(
         "gpu_backend_lib.h",
         "utils.h",
     ],
+    data = if_hermetic_cuda_tools([
+        "@cuda_nvcc//:nvvm",
+    ]),
     local_defines = if_cuda_is_configured([
         "GOOGLE_CUDA=1",
         "USE_RUNTIME_PTX_TARGET_VERSION=1",
