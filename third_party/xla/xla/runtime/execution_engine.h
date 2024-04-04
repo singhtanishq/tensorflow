@@ -41,6 +41,7 @@ namespace runtime {
 // executable with runtime intrinsics. Execution engine only helps with setting
 // up ORC JIT stack to support the execution, but itself doesn't know what it is
 // executing.
+// TODO(tsilytskyi): Remove this class once host_execution_engine is ready.
 class ExecutionEngine {
  public:
   // Pointer to a function exported to the Xla executable.
