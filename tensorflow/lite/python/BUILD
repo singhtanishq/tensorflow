@@ -492,7 +492,7 @@ pytype_strict_library(
         "//tensorflow/lite/python/metrics:metrics_wrapper",
         "//tensorflow/lite/toco:model_flags_proto_py",
         "//tensorflow/lite/toco:toco_flags_proto_py",
-        "//tensorflow/lite/toco:types_proto_py",
+        "//tensorflow/lite/toco:types_proto_py_proto",
         "//tensorflow/lite/toco/python:toco_from_protos",
         "//tensorflow/lite/tools:flatbuffer_utils",
         "//tensorflow/python/framework:dtypes",
