@@ -525,6 +525,12 @@ class Delegate {
         options != nullptr ? *options : TfLiteXNNPackDelegateOptionsDefault();
     delegate_.flags = GetXNNPackDelegateFlags();
     workspace_.reset(workspace);
+
+    // If no weight cache is provided, add one.
+    if (!options_.weights_cache) {
+      internal_weights_cache_.reset(TfLiteXNNPackDelegateWeightsCacheCreate());
+      options_.weights_cache = internal_weights_cache_.get();
+    }
   }
 
   TfLiteIntArray* PrepareOpsToDelegate(TfLiteContext* context);
@@ -676,6 +682,12 @@ class Delegate {
   }
 
  private:
+  struct WeightsCacheDeleter {
+    void operator()(TfLiteXNNPackDelegateWeightsCache* cache) {
+      TfLiteXNNPackDelegateWeightsCacheDelete(cache);
+    }
+  };
+
   TfLiteDelegate delegate_ = {
       reinterpret_cast<void*>(this),  // .data_
       DelegatePrepare,                // .Prepare
@@ -711,6 +723,10 @@ class Delegate {
   TfLiteXNNPackDelegateOptions options_{};
   VariableHolder variable_holder_;
   std::mutex workspace_mutex_;
+  // This may hold a fallback weights cache in the event none is provided when
+  // building the delegate.
+  std::unique_ptr<TfLiteXNNPackDelegateWeightsCache, WeightsCacheDeleter>
+      internal_weights_cache_;
 };
 
 class Subgraph {
@@ -1121,6 +1137,20 @@ class Subgraph {
   TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node,
                        bool enable_subgraph_reshaping, Delegate* delegate) {
     std::lock_guard<std::mutex> lock(delegate->workspace_mutex_);
+
+    // The weights cache needs to be finalized only once. Prepare will be called
+    // for each partition after all the partitions have been created (therefore
+    // all the weights are known and have been packed).
+    if (delegate->internal_weights_cache_ &&
+        !TfLiteXNNPackDelegateWeightsCacheIsFinalized(
+            delegate->internal_weights_cache_.get())) {
+      if (!TfLiteXNNPackDelegateWeightsCacheFinalizeHard(
+              delegate->options_.weights_cache)) {
+        TF_LITE_KERNEL_LOG(context, "failed to finalize XNNPACK weights cache");
+        return kTfLiteError;
+      }
+    }
+
     if (enable_subgraph_reshaping) {
       xnn_status status = xnn_status_invalid_state;
       for (int i = 0; i < inputs_.size(); ++i) {
@@ -7566,6 +7596,12 @@ void TfLiteXNNPackDelegateWeightsCacheDelete(
   auto weights_cache = reinterpret_cast<xnn_weights_cache_t>(cache);
   xnn_delete_weights_cache(weights_cache);
   xnn_deinitialize();
+}
+
+bool TfLiteXNNPackDelegateWeightsCacheIsFinalized(
+    TfLiteXNNPackDelegateWeightsCache* cache) {
+  auto weights_cache = reinterpret_cast<xnn_weights_cache_t>(cache);
+  return xnn_weights_cache_is_finalized(weights_cache);
 }
 
 TfLiteXNNPackDelegateOptions TfLiteXNNPackDelegateOptionsDefault() {
