@@ -1928,6 +1928,68 @@ TEST(XlaBuilderTest, UnboundedAllReduce) {
               GmockMatch(m::Op().WithShapeEqualTo(&expected)));
 }
 
+TEST(XlaBuilderTest, UnboundedAllToAllDynamicSplitDimension) {
+  XlaBuilder b(TestName());
+  TF_ASSERT_OK_AND_ASSIGN(const Shape operand, ParseShape("f32[?, 15]"));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape expected, ParseShape("f32[?, ?]"));
+  AllToAll(Parameter(&b, 0, operand, "operand"), /*split_dimension=*/0,
+           /*concat_dimension=*/1,
+           /*split_count=*/3,
+           /*replica_groups=*/{});
+  TF_ASSERT_OK_AND_ASSIGN(const std::unique_ptr<HloModule> module,
+                          BuildHloModule(b));
+  EXPECT_THAT(GetRoot(*module),
+              GmockMatch(m::Op().WithShapeEqualTo(&expected)));
+}
+
+TEST(XlaBuilderTest, UnboundedAllToAllDynamicConcatDimension) {
+  XlaBuilder b(TestName());
+  TF_ASSERT_OK_AND_ASSIGN(const Shape operand, ParseShape("f32[?, 15]"));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape expected, ParseShape("f32[?, 5]"));
+  AllToAll(Parameter(&b, 0, operand, "operand"), /*split_dimension=*/1,
+           /*concat_dimension=*/0,
+           /*split_count=*/3,
+           /*replica_groups=*/{});
+  TF_ASSERT_OK_AND_ASSIGN(const std::unique_ptr<HloModule> module,
+                          BuildHloModule(b));
+  EXPECT_THAT(GetRoot(*module),
+              GmockMatch(m::Op().WithShapeEqualTo(&expected)));
+}
+
+TEST(XlaBuilderTest, UnboundedAllToAllTupleVariadicUnsupported) {
+  XlaBuilder b(TestName());
+  TF_ASSERT_OK_AND_ASSIGN(const Shape operand, ParseShape("f32[?, 15]{1,0}"));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                          ParseShape("(f32[?, ?], f32[?, ?])"));
+  b.ReportErrorOrReturn(
+      AllToAllTuple(/*operands=*/{Parameter(&b, 0, operand, "operand0"),
+                                  Parameter(&b, 1, operand, "operand1")},
+                    /*replica_groups=*/{}));
+  EXPECT_THAT(
+      BuildHloModule(b),
+      StatusIs(_,
+               HasSubstr(
+                   "AllToAllTuple does not support unbounded dynamic shapes")));
+}
+
+TEST(XlaBuilderTest, UnboundedAllToAllTupleUnsupported) {
+  XlaBuilder b(TestName());
+  TF_ASSERT_OK_AND_ASSIGN(const Shape operand, ParseShape("f32[?, 15]{1,0}"));
+  TF_ASSERT_OK_AND_ASSIGN(const Shape expected,
+                          ParseShape("(f32[?, ?], f32[?, ?])"));
+  b.ReportErrorOrReturn(
+      AllToAllTuple(/*operand=*/Parameter(&b, 0, operand, "operand"),
+                    /*split_dimension=*/0,
+                    /*concat_dimension=*/1,
+                    /*split_count=*/3,
+                    /*replica_groups=*/{}));
+  EXPECT_THAT(
+      BuildHloModule(b),
+      StatusIs(_,
+               HasSubstr(
+                   "AllToAllTuple does not support unbounded dynamic shapes")));
+}
+
 TEST(XlaBuilderTest, UnboundedAnd) {
   XlaBuilder b(TestName());
   TF_ASSERT_OK_AND_ASSIGN(const Shape lhs,

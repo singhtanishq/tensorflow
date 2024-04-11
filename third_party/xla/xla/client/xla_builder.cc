@@ -3833,6 +3833,13 @@ XlaOp XlaBuilder::AllToAllTuple(
     const std::optional<ChannelHandle>& channel_id) {
   return ReportErrorOrReturn([&]() -> absl::StatusOr<XlaOp> {
     TF_ASSIGN_OR_RETURN(const Shape* operand_shape, GetShapePtr(operand));
+    if (operand_shape->is_unbounded_dynamic() ||
+        split_dimension == Shape::kUnboundedSize ||
+        concat_dimension == Shape::kUnboundedSize ||
+        split_count == Shape::kUnboundedSize) {
+      return InvalidArgument(
+          "AllToAllTuple does not support unbounded dynamic shapes");
+    }
 
     // The HloInstruction for AllToAll currently only handles the data
     // communication: it accepts N already split parts and scatters them to N
@@ -3850,7 +3857,9 @@ XlaOp XlaBuilder::AllToAllTuple(
     std::vector<XlaOp> slices;
     slices.reserve(split_count);
     const int64_t block_size =
-        operand_shape->dimensions(split_dimension) / split_count;
+        operand_shape->is_unbounded_dynamic_dimension(split_dimension)
+            ? Shape::kUnboundedSize
+            : operand_shape->dimensions(split_dimension) / split_count;
     for (int i = 0; i < split_count; i++) {
       slices.push_back(SliceInDim(operand, /*start_index=*/i * block_size,
                                   /*limit_index=*/(i + 1) * block_size,
@@ -3858,14 +3867,14 @@ XlaOp XlaBuilder::AllToAllTuple(
     }
 
     // Handle data communication.
-    XlaOp alltoall =
+    XlaOp all_to_all =
         this->AllToAllTuple(slices, replica_groups, layout, channel_id);
 
     // Concat the N received parts.
     std::vector<XlaOp> received;
     received.reserve(split_count);
     for (int i = 0; i < split_count; i++) {
-      received.push_back(this->GetTupleElement(alltoall, i));
+      received.push_back(this->GetTupleElement(all_to_all, i));
     }
     return this->ConcatInDim(received, concat_dimension);
   });
