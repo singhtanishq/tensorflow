@@ -402,7 +402,8 @@ TfrtCpuClient::TfrtCpuClient(
       topology_(TfrtCpuTopologyDescription::Create(
           platform_id(), platform_name(), platform_version(), owned_devices_,
           cpu::DetectMachineAttributes())),
-      asynchronous_(asynchronous) {
+      asynchronous_(asynchronous),
+      last_enqueue_event_(tsl::MakeAvailableAsyncValueRef<CpuEvent>()) {
   for (const std::unique_ptr<TfrtCpuDevice>& device : owned_devices_) {
     devices_.push_back(device.get());
     CHECK(id_to_device_.insert({device->id(), device.get()}).second)
@@ -1161,7 +1162,8 @@ Status TfrtCpuExecutable::CheckBufferCompatibilities(
 absl::StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
     absl::Span<PjRtBuffer* const> argument_handles, int replica, int partition,
     const RunId& run_id, const ExecuteOptions& options,
-    tsl::AsyncValueRef<CpuEvent> last_collective_launch_event, bool fill_future,
+    tsl::AsyncValueRef<CpuEvent> last_collective_launch_event,
+    tsl::AsyncValueRef<CpuEvent> last_enqueue_event, bool fill_future,
     TfrtCpuDevice* device) {
   tsl::profiler::TraceMe traceme("TfrtCpuExecutable::ExecuteHelper");
 
@@ -1388,6 +1390,13 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
     if (is_a_collective_launch) {
       client_->SetLastCollectiveLaunchEvent(execute_event.CopyRef());
     }
+    bool is_a_enqueue = !!last_enqueue_event;
+    if (is_a_enqueue && !last_enqueue_event.IsAvailable()) {
+      input_deps.push_back(std::move(last_enqueue_event));
+    }
+    if (is_a_enqueue) {
+      client_->SetLastEnqueueEvent(execute_event.CopyRef());
+    }
     std::vector<tsl::RCReference<tsl::AsyncValue>> input_deps_avs_copy =
         CopyAsyncValues(input_deps);
     EnqueueWorkWhenReady(
@@ -1412,16 +1421,6 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
             }
           }
 
-          // Commit donation transactions early before execution to prevent a
-          // tricky deadlock case when we have both donated args and python host
-          // callbacks: `~TfrtCpuBuffer()` will wait for all pending donations
-          // to be committed, while it may be holding the python GIL. However,
-          // when the computation contains python callbacks, they also need the
-          // python GIL, which leads to a deadlock.
-          for (auto& donation_transaction : donation_transactions) {
-            std::move(donation_transaction).Commit();
-          }
-
           // Set denormal and rounding behavior to match the default TF
           // ThreadPool behavior.
           tsl::port::ScopedFlushDenormal flush;
@@ -1434,6 +1433,10 @@ absl::StatusOr<PjRtLoadedExecutable::Result> TfrtCpuExecutable::ExecuteHelper(
                                              nullptr, buffer_pointers.data(),
                                              &status, nullptr);
           error_message = xla::CustomCallStatusGetMessage(&status);
+
+          for (auto& donation_transaction : donation_transactions) {
+            std::move(donation_transaction).Commit();
+          }
 
           if (error_message) {
             // CPU computation fails with an error.
@@ -1572,7 +1575,7 @@ TfrtCpuExecutable::Execute(
     auto statusor = ExecuteHelper(
         argument_handles[0], replica, partition, run_id, options,
         /*last_collective_launch_event=*/tsl::AsyncValueRef<CpuEvent>(),
-        returned_futures.has_value());
+        client_->GetLastEnqueueEvent(), returned_futures.has_value());
 
     if (!statusor.ok()) {
       return std::move(statusor).status();
@@ -1607,6 +1610,7 @@ TfrtCpuExecutable::Execute(
         auto statusor =
             ExecuteHelper(argument_handles[i], replica, partition, run_id,
                           options, last_collective_launch_event.CopyRef(),
+                          /*last_enqueue_event=*/tsl::AsyncValueRef<CpuEvent>(),
                           returned_futures.has_value());
         if (statusor.ok()) {
           wrapped_results[i] = std::move(statusor->buffers);
@@ -1668,7 +1672,9 @@ TfrtCpuExecutable::ExecuteSharded(
               argument_handles, addressable_device_logical_ids_[i].replica,
               addressable_device_logical_ids_[i].partition, RunId(), options,
               /*last_collective_launch_event=*/
-              tsl::AsyncValueRef<CpuEvent>(), fill_future));
+              tsl::AsyncValueRef<CpuEvent>(),
+              /*last_enqueue_event=*/tsl::AsyncValueRef<CpuEvent>(),
+              fill_future));
       returned_future = std::move(result.future);
       return std::move(result.buffers);
     }
@@ -1706,7 +1712,8 @@ TfrtCpuExecutable::ExecutePortable(
           /*replica=*/0,
           /*partition=*/0, RunId(), options,
           /*last_collective_launch_event=*/tsl::AsyncValueRef<CpuEvent>(),
-          fill_future, tensorflow::down_cast<TfrtCpuDevice*>(device)));
+          /*last_enqueue_event=*/tsl::AsyncValueRef<CpuEvent>(), fill_future,
+          tensorflow::down_cast<TfrtCpuDevice*>(device)));
   returned_future = std::move(result.future);
   return std::move(result.buffers);
 }
