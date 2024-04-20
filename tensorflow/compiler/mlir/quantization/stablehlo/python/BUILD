@@ -30,6 +30,7 @@ package(
 pytype_strict_library(
     name = "quantization",
     srcs = ["quantization.py"],
+    visibility = ["//visibility:public"],
     deps = [
         ":pywrap_quantization",
         "//tensorflow/compiler/mlir/quantization/stablehlo:quantization_config_proto_py",
