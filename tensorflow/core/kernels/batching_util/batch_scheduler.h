@@ -35,9 +35,11 @@ limitations under the License.
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
+#include "absl/flags/declare.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/lib/core/notification.h"
@@ -49,6 +51,9 @@ limitations under the License.
 #include "tensorflow/core/platform/types.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tsl/platform/criticality.h"
+
+// Exposed for testing only.
+ABSL_DECLARE_FLAG(std::string, tensorflow_batch_padding_policy);
 
 namespace tensorflow {
 namespace serving {
@@ -67,6 +72,22 @@ enum class MixedPriorityBatchingPolicy {
 
 absl::StatusOr<MixedPriorityBatchingPolicy> GetMixedPriorityBatchingPolicy(
     absl::string_view attr_value);
+
+// See the description of the --tensorflow_batch_padding_policy flag for the
+// documentation.
+enum class BatchPaddingPolicy {
+  kPadUp,
+  kBatchDown,
+  kMinimizeTpuCostPerRequest,
+};
+
+// Returns the batching policy specified by the
+// --tensorflow_batch_padding_policy flag.
+//
+// To allow testing code with different flag values, this function does not
+// cache the parsed value of the flag and should therefore preferably not be
+// called on every request.
+BatchPaddingPolicy GetBatchPaddingPolicy();
 
 // The abstract superclass for a unit of work to be done as part of a batch.
 //
