@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <vector>
 
+#include "llvm/ADT/STLExtras.h"
 #include "tensorflow/compiler/tf2xla/shape_util.h"
 #include "xla/client/xla_builder.h"
 #include "xla/literal_util.h"
@@ -25,6 +26,7 @@ limitations under the License.
 #include "xla/status_macros.h"
 #include "xla/util.h"
 #include "xla/xla_data.pb.h"
+#include "tensorflow/core/framework/op.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/lib/core/errors.h"
 #include "tensorflow/core/platform/statusor.h"
@@ -492,6 +494,28 @@ Status ExecuteTensorListSetItem(xla::XlaOp list, xla::XlaOp index,
   start_indices[0] = index;
 
   xla::XlaOp list_part = xla::GetTupleElement(list, 0);
+  {
+    TF_ASSIGN_OR_RETURN(const xla::Shape* list_part_shape,
+                        b->GetShapePtr(list_part));
+    TF_ASSIGN_OR_RETURN(const xla::Shape* update_shape, b->GetShapePtr(update));
+    for (const auto& it : llvm::enumerate(llvm::zip(
+             list_part_shape->dimensions(), update_shape->dimensions()))) {
+      auto list_part_dim_size = std::get<0>(it.value());
+      auto update_dim_size = std::get<1>(it.value());
+      // If the update is larger than the list part, the DynamicUpdateSlice will
+      // fail so just ignore this operation and return list as is.
+      if (update_dim_size > list_part_dim_size) {
+        LOG_FIRST_N(WARNING, 1)
+            << "Warning: TensorListSetItem: ignoring set item because the "
+               "update dim ["
+            << update_dim_size << "] is larger than the list dim ["
+            << list_part_dim_size << "] at dimension " << it.index() << ".";
+
+        *result = list;
+        return absl::OkStatus();
+      }
+    }
+  }
   xla::XlaOp updated_list_part =
       xla::DynamicUpdateSlice(list_part, update, start_indices);
 

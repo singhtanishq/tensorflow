@@ -17,7 +17,6 @@
 import numpy as np
 
 from tensorflow.compiler.tests import xla_test
-from tensorflow.python.framework import errors
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.platform import test
@@ -60,11 +59,12 @@ class GatherNdTest(xla_test.XLATestCase):
       gather_nd_ok_val = self._runGather(params_empty, indices_empty)
       self.assertAllClose(np.empty((0,), dtype=np.float32), gather_nd_ok_val)
 
+      # Zero sized indices results in a constant of 0
       params_empty = np.empty((0, 3), dtype=np.float32)
       indices_nonempty = np.zeros((1, 2), dtype=np.int32)
-      with self.assertRaisesWithPredicateMatch(
-          errors.InvalidArgumentError, r"Gather dimension 0 is of size zero"):
-        self._runGather(params_empty, indices_nonempty)
+      self.assertAllEqual(
+          self._runGather(params_empty, indices_nonempty), np.zeros([3])
+      )
 
   def testIndexScalar(self):
     params = np.array(
