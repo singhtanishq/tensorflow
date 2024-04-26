@@ -30,7 +30,7 @@ cc_library(
     hdrs = ["ifrt_serving_core_selector.h"],
     deps = [
         "@com_google_absl//absl/strings",
-        "@local_tsl//tsl/framework:serving_device_selector",
+        "@local_xla//xla/tsl/framework:serving_device_selector",
     ],
 )
 
@@ -42,8 +42,8 @@ tf_cc_test(
         ":ifrt_serving_core_selector",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
-        "@local_tsl//tsl/framework:serving_device_selector",
-        "@local_tsl//tsl/framework/test_util:mock_serving_device_selector",
+        "@local_xla//xla/tsl/framework:serving_device_selector",
+        "@local_xla//xla/tsl/framework/test_util:mock_serving_device_selector",
     ],
 )
 
