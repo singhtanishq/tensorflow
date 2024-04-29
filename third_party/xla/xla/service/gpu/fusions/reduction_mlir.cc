@@ -16,10 +16,13 @@ limitations under the License.
 
 #include <cstdint>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 #include "absl/algorithm/container.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
 #include "llvm/ADT/DenseMap.h"
@@ -46,10 +49,12 @@ limitations under the License.
 #include "xla/service/gpu/fusions/mlir/type_util.h"
 #include "xla/service/gpu/fusions/reduction_base.h"
 #include "xla/service/gpu/hlo_fusion_analysis.h"
+#include "xla/service/gpu/hlo_traversal.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/service/gpu/model/indexing_analysis.h"
 #include "xla/service/gpu/model/indexing_map.h"
 #include "xla/service/gpu/reduction_utils.h"
+#include "xla/shape.h"
 #include "xla/shape_util.h"
 #include "xla/status_macros.h"
 
@@ -89,7 +94,10 @@ struct MlirReductionFusion::EmitterState {
     }
 
     CHECK_EQ(result_index, 0);
-    return absl::c_find(owner.analysis().fusion_roots(), root) -
+    return absl::c_find_if(owner.analysis().fusion_roots(),
+                           [&](const HloInstructionAdaptor& instr) {
+                             return &instr.instruction() == root;
+                           }) -
            owner.analysis().fusion_roots().begin();
   }
 
@@ -111,9 +119,10 @@ MlirReductionFusion::MlirReductionFusion(const HloFusionAnalysis& analysis)
   for (auto [root, hero, is_reduction] :
        llvm::zip(analysis.fusion_roots(), analysis.fusion_heroes(),
                  reduction_info().GetGroups().is_reduction_root)) {
-    (is_reduction ? reduction_roots_ : side_output_roots_).push_back(root);
-    if (is_reduction && seen_heroes.insert(hero).second) {
-      reduction_heroes_.push_back(hero);
+    (is_reduction ? reduction_roots_ : side_output_roots_)
+        .push_back(&root.instruction());
+    if (is_reduction && seen_heroes.insert(&hero.instruction()).second) {
+      reduction_heroes_.push_back(&hero.instruction());
     }
   }
 }
@@ -337,7 +346,7 @@ HloValueMap MlirReductionFusion::EmitterState::EmitPerThreadReducedElements(
        llvm::zip(owner.reduction_info().GetGroups().is_reduction_root,
                  owner.analysis().fusion_heroes(), output_args)) {
     if (is_reduction) {
-      iter_arg_inits.append(inits.at(hero));
+      iter_arg_inits.append(inits.at(&hero.instruction()));
     } else {
       iter_arg_inits.push_back(output);
     }
@@ -360,9 +369,10 @@ HloValueMap MlirReductionFusion::EmitterState::EmitPerThreadReducedElements(
     };
     llvm::SmallVector<SideOutput> side_outputs;
     int start = 0;
-    for (auto [is_reduction, hero] :
+    for (auto [is_reduction, hero_adaptor] :
          llvm::zip(owner.reduction_info().GetGroups().is_reduction_root,
                    owner.analysis().fusion_heroes())) {
+      const HloInstruction* hero = &hero_adaptor.instruction();
       const xla::Shape& input_shape =
           is_reduction ? hero->operand(0)->shape() : hero->shape();
       llvm::SmallVector<Value> input_indices = mlir_converter::ApplyAffineMap(
@@ -406,9 +416,10 @@ HloValueMap MlirReductionFusion::EmitterState::EmitPerThreadReducedElements(
                                           tile_indexing, body_builder);
   mlir::ValueRange result_range = results;
   HloValueMap results_per_hero;
-  for (auto [is_reduction, hero] :
+  for (auto [is_reduction, hero_adaptor] :
        llvm::zip(owner.reduction_info().GetGroups().is_reduction_root,
                  owner.analysis().fusion_heroes())) {
+    const HloInstruction* hero = &hero_adaptor.instruction();
     int num_outs =
         hero->shape().IsTuple() ? hero->shape().tuple_shapes_size() : 1;
     results_per_hero[hero] = result_range.take_front(num_outs);

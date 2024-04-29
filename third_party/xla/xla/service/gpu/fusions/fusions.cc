@@ -53,6 +53,7 @@ limitations under the License.
 #include "xla/service/gpu/fusions/transpose_mlir.h"
 #include "xla/service/gpu/fusions/triton.h"
 #include "xla/service/gpu/hlo_fusion_analysis.h"
+#include "xla/service/gpu/hlo_traversal.h"
 #include "xla/service/gpu/ir_emission_utils.h"
 #include "xla/shape.h"
 #include "xla/shape_util.h"
@@ -76,10 +77,10 @@ bool IsParameterOrGteOfParameter(const HloInstruction* instr) {
 
 bool IsDynamicUpdateSliceFusion(const HloFusionAnalysis& analysis) {
   return absl::c_all_of(
-      analysis.fusion_roots(), [](const HloInstruction* root) {
-        return root->opcode() == HloOpcode::kDynamicUpdateSlice ||
-               (root->opcode() == HloOpcode::kBitcast &&
-                root->operand(0)->opcode() == HloOpcode::kDynamicUpdateSlice);
+      analysis.fusion_roots(), [](const HloInstructionAdaptor& root) {
+        return root.opcode() == HloOpcode::kDynamicUpdateSlice ||
+               (root.opcode() == HloOpcode::kBitcast &&
+                root.GetOperand(0).opcode() == HloOpcode::kDynamicUpdateSlice);
       });
 }
 
@@ -88,16 +89,17 @@ bool IsDynamicUpdateSliceFusion(const HloFusionAnalysis& analysis) {
 std::optional<absl::StatusOr<std::unique_ptr<FusionInterface>>>
 HloFusionInfo::GetCopyFusion() const {
   std::vector<BufferAllocation::Slice> src_buffers;
-  for (auto* root : analysis().fusion_roots()) {
-    if (root->opcode() != HloOpcode::kCopy ||
-        root->operand(0)->opcode() != HloOpcode::kParameter ||
-        !LayoutUtil::Equal(root->operand(0)->shape().layout(),
-                           root->shape().layout())) {
+  for (const HloInstructionAdaptor& root : analysis().fusion_roots()) {
+    const HloInstruction* root_operand = root.instruction().operand(0);
+    if (root.opcode() != HloOpcode::kCopy ||
+        root_operand->opcode() != HloOpcode::kParameter ||
+        !LayoutUtil::Equal(root_operand->shape().layout(),
+                           root.shape().layout())) {
       return std::nullopt;
     }
 
     const HloInstruction* src_instr =
-        instr_->operands()[root->operand(0)->parameter_number()];
+        instr_->operand(root_operand->parameter_number());
     TF_ASSIGN_OR_RETURN(BufferAllocation::Slice slice,
                         buffer_assignment_->GetUniqueSlice(src_instr, {}));
     src_buffers.push_back(slice);
