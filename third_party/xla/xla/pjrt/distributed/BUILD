@@ -148,6 +148,7 @@ xla_cc_test(
         ":topology_util",
         "//xla:protobuf_util",
         "//xla:status_macros",
+        "//xla/tsl/distributed_runtime/coordination:coordination_service_agent",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/synchronization",
         "@com_google_absl//absl/time",

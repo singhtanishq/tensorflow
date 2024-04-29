@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef XLA_PJRT_DISTRIBUTED_CLIENT_H_
 #define XLA_PJRT_DISTRIBUTED_CLIENT_H_
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -138,6 +139,13 @@ class DistributedRuntimeClient {
   // `barrier_id` should be unique across barriers.
   virtual absl::Status WaitAtBarrier(std::string barrier_id,
                                      absl::Duration timeout) = 0;
+
+  // Blocks until all nodes (or the ones specified in `nodes`) are at the
+  // barrier or the barrier times out. `barrier_id` should be unique across
+  // barriers.
+  virtual absl::Status WaitAtBarrier(std::string barrier_id,
+                                     absl::Duration timeout,
+                                     const std::vector<int32_t>& nodes) = 0;
 
   // Returns pointer to coordination service agent, or InternalError if the
   // client does not use coordination service.
