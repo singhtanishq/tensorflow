@@ -820,6 +820,12 @@ class HloComputation {
 
   void RemoveAsyncStart() { async_start_ = nullptr; }
 
+  int64_t num_parallel_threads() const { return num_parallel_threads_; }
+
+  void SetNumParallelThreads(int64_t num_parallel_threads) {
+    num_parallel_threads_ = num_parallel_threads;
+  }
+
   // Clear the unique ID of the computation so that it can be re-assigned, such
   // as for the purpose of compacting the unique IDs.
   void ClearUniqueIdInternal() { unique_id_ = -1; }
@@ -961,6 +967,9 @@ class HloComputation {
   // calls this computation.
   // Otherwise, this is empty.
   HloInstruction* async_start_ = nullptr;
+
+  // Number of threads that concurrently execute this computation.
+  int64_t num_parallel_threads_ = 1;
 
   HloInstruction::InstructionVector param_instructions_;
 

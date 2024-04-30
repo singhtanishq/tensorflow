@@ -2227,7 +2227,8 @@ absl::Status GpuCompiler::RunPostSchedulingPipelines(
         /*memory_limit_bytes=*/scheduler_mem_limit,
         /*block_size_limit=*/1, /*block_rematerialization_factor=*/1,
         /*min_remat_size=*/0, /*compact_shape_function=*/nullptr,
-        /*host_memory_offload_config=*/std::nullopt);
+        /*host_memory_offload_config=*/std::nullopt,
+        /*async_threads=*/{});
     HloRematerialization::RematerializationSizes sizes;
     pipeline.AddPass<HloRematerialization>(options, sizes);
     pipeline.AddPass<StreamAttributeAnnotator>();

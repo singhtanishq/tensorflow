@@ -2761,7 +2761,9 @@ absl::StatusOr<bool> HloRematerialization::RematerializeComputation(
       // in the callee computations.
       for (HloComputation* called_computation :
            callsite->called_computations()) {
-        if (!ContainsKey(rematerialized_computations_, called_computation)) {
+        if (!ContainsKey(rematerialized_computations_, called_computation) &&
+            HloInstruction::IsThreadIncluded(
+                called_computation->execution_thread(), execution_threads)) {
           // Memory limit for the subcomputation is the memory limit less the
           // amount of memory used at this point in the computation.
           int64_t subcomputation_memory_limit_bytes = std::max<int64_t>(
@@ -2862,15 +2864,66 @@ absl::StatusOr<bool> HloRematerialization::Run(
         module_output_size += options_.hlo_cost_analysis.GetShapeSize(subshape);
       });
 
-  const int64_t adjusted_memory_limit_bytes =
+  int64_t adjusted_memory_limit_bytes =
       std::max<int64_t>(0, options_.memory_limit_bytes - module_output_size);
   VLOG(1) << "Adjusted memory limit accounting for output ("
           << HumanReadableNumBytes(module_output_size)
           << "): " << HumanReadableNumBytes(adjusted_memory_limit_bytes);
 
+  call_graph_ = CallGraph::Build(module);
+
+  // Buffer assignment allocates a single stack for all asynchronous
+  // computations of the same thread, which persists for the entire duration of
+  // the program. We need to account for this by adjusting the memory limit.
+  int64_t total_async_peak_memory = 0;
+  for (const auto& async_thread : options_.async_threads) {
+    // We cannot compute memory usage for both the main and asynchronous threads
+    // at the same time, as that will cause the asynchronous callee usage to be
+    // added to the main thread callers usage. The callee's memory is
+    // preallocated, so the caller doesn't pay for it.
+    TF_RETURN_IF_ERROR(call_graph_->VisitNodes(
+        [this, module, &async_thread](const CallGraphNode& node) -> Status {
+          if (node.context() == CallContext::kControlFlow &&
+              node.computation()->execution_thread() == async_thread) {
+            TF_ASSIGN_OR_RETURN(computation_peak_memory_[node.computation()],
+                                ComputePeakMemory(node.computation(),
+                                                  module->schedule().sequence(
+                                                      node.computation()),
+                                                  {async_thread}));
+          }
+          return OkStatus();
+        },
+        /*visit_unreachable_nodes=*/false));
+
+    int64_t async_peak_memory = 0;
+    // Only consider asynchronous computations invoked from the main thread.
+    for (const auto& [computation, peak_memory] : computation_peak_memory_) {
+      if (computation->execution_thread() == async_thread &&
+          computation->IsAsyncComputation() &&
+          HloInstruction::IsThreadIncluded(
+              computation->AsyncStart()->parent()->execution_thread(),
+              execution_threads)) {
+        // Adjust memory usage for parallel execution of the same computation
+        // on different devices.
+        const int64_t parallel_peak_memory =
+            peak_memory * computation->num_parallel_threads();
+        async_peak_memory = std::max(async_peak_memory, parallel_peak_memory);
+      }
+    }
+    adjusted_memory_limit_bytes =
+        std::max<int64_t>(0, adjusted_memory_limit_bytes - async_peak_memory);
+    total_async_peak_memory += async_peak_memory;
+    VLOG(1) << "Adjusted memory limit accounting for " << async_thread
+            << " thread (" << HumanReadableNumBytes(async_peak_memory)
+            << "): " << HumanReadableNumBytes(adjusted_memory_limit_bytes);
+
+    // Reset back to a clean state, since we don't expect to utilize the
+    // async computation memory usage anymore.
+    computation_peak_memory_.clear();
+  }
+
   // Compute peak memory usage of all computations in the module called in a
   // sequential context.
-  call_graph_ = CallGraph::Build(module);
   TF_RETURN_IF_ERROR(call_graph_->VisitNodes(
       [this, module, &execution_threads](const CallGraphNode& node) -> Status {
         if (node.context() == CallContext::kControlFlow &&
@@ -2887,12 +2940,13 @@ absl::StatusOr<bool> HloRematerialization::Run(
       /*visit_unreachable_nodes=*/false));
 
   // The peak memory usage of the module equals the peak memory use of the entry
-  // computation plus the output size of the computation. This is because the
-  // peak memory for a computation does not include the output as this is
-  // typically accounted for in the caller.
+  // computation plus the output size of the computation plus memory use of
+  // asynchronous computations. This is because the peak memory for a
+  // computation does not include the output as this is typically accounted for
+  // in the caller.
   const int64_t before_peak_memory =
       computation_peak_memory_.at(module->entry_computation()) +
-      module_output_size;
+      module_output_size + total_async_peak_memory;
   VLOG(1) << "Peak memory usage of module (before): "
           << HumanReadableNumBytes(before_peak_memory);
 
@@ -2928,7 +2982,7 @@ absl::StatusOr<bool> HloRematerialization::Run(
           << net_instructions_added_ << " net instructions added";
   const int64_t current_peak_memory =
       computation_peak_memory_.at(module->entry_computation()) +
-      module_output_size;
+      module_output_size + total_async_peak_memory;
   VLOG(1) << "Peak memory usage of module now "
           << HumanReadableNumBytes(current_peak_memory) << " ("
           << current_peak_memory << " bytes), was "

@@ -1742,6 +1742,7 @@ std::unique_ptr<HloComputation> HloComputation::CloneInContext(
 
   context.MapComputation(this, result.get());
   result->SetExecutionThread(execution_thread());
+  result->SetNumParallelThreads(num_parallel_threads());
   return result;
 }
 

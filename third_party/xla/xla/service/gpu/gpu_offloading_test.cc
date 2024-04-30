@@ -80,7 +80,8 @@ class GpuOffloadingTest : public HloTestBase {
         cost_analysis, config, memory_limit_bytes,
         /*block_size_limit=*/1, /*block_rematerialization_factor=*/1,
         min_remat_size, /*compact_shape_function=*/nullptr,
-        host_memory_offload_config);
+        host_memory_offload_config,
+        /*async_threads=*/{});
     HloRematerialization::RematerializationSizes sizes;
     HloRematerialization remat(options, sizes);
     return remat.Run(module);
