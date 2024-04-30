@@ -123,47 +123,6 @@ bool IsLoweringSupported(AffineExpr expr, RangeEvaluator& range_evaluator) {
          IsLoweringSupported(bin_op.getRHS(), range_evaluator);
 }
 
-struct RewriteAffineApply : OpRewritePattern<mlir::affine::AffineApplyOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(mlir::affine::AffineApplyOp op,
-                                PatternRewriter& rewriter) const override {
-    AffineMap affine_map = op.getAffineMap();
-    std::vector<DimVar> dim_ranges(affine_map.getNumDims());
-    std::vector<RangeVar> symbol_ranges(affine_map.getNumSymbols());
-
-    for (int i = 0; i < affine_map.getNumInputs(); ++i) {
-      if (auto range = GetRange(op->getOperand(i))) {
-        if (i >= dim_ranges.size()) {
-          symbol_ranges[i - dim_ranges.size()] = RangeVar{*range};
-        } else {
-          dim_ranges[i] = DimVar{*range};
-        }
-      } else {
-        return rewriter.notifyMatchFailure(op, "failed to deduce range");
-      }
-    }
-
-    IndexingMap indexing_map(affine_map, std::move(dim_ranges),
-                             std::move(symbol_ranges),
-                             /*rt_vars=*/{});
-    indexing_map.Simplify(GetIndexingMapForInstruction);
-    auto result_expr = indexing_map.GetAffineMap().getResult(0);
-
-    ImplicitLocOpBuilder b(op.getLoc(), rewriter);
-    RangeEvaluator range_evaluator = indexing_map.GetRangeEvaluator();
-    if (!IsLoweringSupported(result_expr, range_evaluator)) {
-      return rewriter.notifyMatchFailure(op,
-                                         "unable to lower the affine apply");
-    }
-    b.setInsertionPoint(op);
-    auto result = EvaluateExpression(
-        b, result_expr, indexing_map.GetDimensionCount(), op->getOperands());
-    rewriter.replaceOp(op, result);
-    return mlir::success();
-  }
-};
-
 struct RewriteApplyIndexingOp : OpRewritePattern<ApplyIndexingOp> {
   using OpRewritePattern::OpRewritePattern;
 
@@ -200,7 +159,7 @@ struct SimplifyAffinePass
   void runOnOperation() override {
     MLIRContext* ctx = &getContext();
     mlir::RewritePatternSet patterns(ctx);
-    patterns.add<RewriteAffineApply, RewriteApplyIndexingOp>(ctx);
+    patterns.add<RewriteApplyIndexingOp>(ctx);
     mlir::GreedyRewriteConfig config;
     // There's no point simplifying more than once.
     config.strictMode = mlir::GreedyRewriteStrictness::ExistingOps;
@@ -212,40 +171,6 @@ struct SimplifyAffinePass
 };
 
 }  // namespace
-
-std::optional<Interval> GetRange(mlir::Value value) {
-  auto attr_to_range = [](mlir::Attribute attr) -> std::optional<Interval> {
-    if (!attr) {
-      return std::nullopt;
-    }
-    auto values = llvm::to_vector(
-        mlir::cast<mlir::ArrayAttr>(attr).getAsValueRange<mlir::IntegerAttr>());
-    return {{values[0].getSExtValue(), values[1].getSExtValue()}};
-  };
-
-  if (value.getDefiningOp()) {
-    return attr_to_range(value.getDefiningOp()->getAttr("xla.range"));
-  }
-
-  auto bbarg = mlir::dyn_cast<mlir::BlockArgument>(value);
-  if (!bbarg) {
-    return std::nullopt;
-  }
-
-  auto parent = bbarg.getParentBlock()->getParentOp();
-  if (auto func_op = mlir::dyn_cast<mlir::func::FuncOp>(parent)) {
-    return attr_to_range(func_op.getArgAttr(bbarg.getArgNumber(), "xla.range"));
-  }
-
-  if (auto for_op = mlir::dyn_cast<mlir::scf::ForOp>(parent)) {
-    llvm::APInt lb, ub;
-    if (mlir::matchPattern(for_op.getLowerBound(), mlir::m_ConstantInt(&lb)) &&
-        mlir::matchPattern(for_op.getUpperBound(), mlir::m_ConstantInt(&ub))) {
-      return {{lb.getSExtValue(), ub.getSExtValue() - 1}};
-    }
-  }
-  return std::nullopt;
-}
 
 std::unique_ptr<mlir::Pass> CreateSimplifyAffinePass() {
   return std::make_unique<SimplifyAffinePass>();

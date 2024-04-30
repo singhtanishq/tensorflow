@@ -38,6 +38,41 @@ namespace gpu {
 
 namespace {
 
+// Returns the range of a given value, if it can be statically determined.
+std::optional<Interval> GetRange(mlir::Value value) {
+  auto attr_to_range = [](mlir::Attribute attr) -> std::optional<Interval> {
+    if (!attr) {
+      return std::nullopt;
+    }
+    auto values = llvm::to_vector(
+        mlir::cast<mlir::ArrayAttr>(attr).getAsValueRange<mlir::IntegerAttr>());
+    return {{values[0].getSExtValue(), values[1].getSExtValue()}};
+  };
+
+  if (value.getDefiningOp()) {
+    return attr_to_range(value.getDefiningOp()->getAttr("xla.range"));
+  }
+
+  auto bbarg = mlir::dyn_cast<mlir::BlockArgument>(value);
+  if (!bbarg) {
+    return std::nullopt;
+  }
+
+  auto parent = bbarg.getParentBlock()->getParentOp();
+  if (auto func_op = mlir::dyn_cast<mlir::func::FuncOp>(parent)) {
+    return attr_to_range(func_op.getArgAttr(bbarg.getArgNumber(), "xla.range"));
+  }
+
+  if (auto for_op = mlir::dyn_cast<mlir::scf::ForOp>(parent)) {
+    llvm::APInt lb, ub;
+    if (mlir::matchPattern(for_op.getLowerBound(), mlir::m_ConstantInt(&lb)) &&
+        mlir::matchPattern(for_op.getUpperBound(), mlir::m_ConstantInt(&ub))) {
+      return {{lb.getSExtValue(), ub.getSExtValue() - 1}};
+    }
+  }
+  return std::nullopt;
+}
+
 Interval::ComparisonResult EvaluateCmpI(mlir::arith::CmpIPredicate pred,
                                         Interval lhs, int64_t rhs) {
   switch (pred) {

@@ -34,7 +34,7 @@ limitations under the License.
 #include "mlir/IR/PatternMatch.h"  // from @llvm-project  // IWYU pragma: keep
 #include "mlir/IR/SymbolTable.h"  // from @llvm-project
 #include "mlir/IR/TypeUtilities.h"  // from @llvm-project  // IWYU pragma: keep
-#include "mlir/IR/Value.h"  // from @llvm-project
+#include "mlir/IR/ValueRange.h"  // from @llvm-project
 #include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/InliningUtils.h"  // from @llvm-project
@@ -159,6 +159,16 @@ void AllocateSharedOp::getAsmResultNames(
 //===----------------------------------------------------------------------===//
 // ApplyIndexingOp
 //===----------------------------------------------------------------------===//
+
+void ApplyIndexingOp::build(OpBuilder &builder, OperationState &result,
+                            ValueRange dims, ValueRange symbols,
+                            const IndexingMap &indexing_map) {
+  SmallVector<Value, 4> operands;
+  operands.reserve(dims.size() + symbols.size());
+  operands.append(dims.begin(), dims.end());
+  operands.append(symbols.begin(), symbols.end());
+  build(builder, result, operands, indexing_map);
+}
 
 void ApplyIndexingOp::build(OpBuilder &builder, OperationState &result,
                             ValueRange operands,
