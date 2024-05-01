@@ -48,6 +48,26 @@ ServingExecutableRegistry::Handle& ServingExecutableRegistry::Handle::operator=(
 
 ServingExecutableRegistry::Handle::~Handle() { Release(); }
 
+void ServingExecutableRegistry::Handle::Freeze() {
+  if (!program_id_.has_value()) {
+    return;
+  }
+
+  absl::MutexLock l(&ServingExecutableRegistry::mu_);
+
+  const auto it = ServingExecutableRegistry::executables_->find(*program_id_);
+  if (it == ServingExecutableRegistry::executables_->end()) {
+    LOG(ERROR) << "Program " << *program_id_ << " not found in the registry";
+    return;
+  }
+
+  VLOG(1) << "Freeze the program " << *program_id_ << " from signature '"
+          << it->second->signature_name() << "' of model '"
+          << it->second->model_name() << "'";
+
+  it->second->Freeze();
+}
+
 void ServingExecutableRegistry::Handle::Release() {
   if (!program_id_.has_value()) {
     return;

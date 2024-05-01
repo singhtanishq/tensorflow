@@ -88,7 +88,7 @@ CreateIfrtServingExecutable(mlir::MLIRContext& context, int64_t program_id) {
   TF_ASSIGN_OR_RETURN(std::unique_ptr<tensorflow::StaticDeviceMgr> device_mgr,
                       CreateTfStaticDeviceMgr());
 
-  return std::make_unique<IfrtServingExecutable>(
+  return IfrtServingExecutable::Create(
       program_id, "test", "main", std::move(mlir_module), client,
       &GetThreadPool(), &ifrt_loaded_variable_registry,
       &ifrt_restore_tensor_registry, work_queue.get(), device_mgr.get(),

@@ -27,6 +27,7 @@ limitations under the License.
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -70,13 +71,16 @@ limitations under the License.
 #include "tensorflow/core/tfrt/ifrt/ifrt_loaded_variable_registry.h"
 #include "tensorflow/core/tfrt/ifrt/ifrt_loaded_variable_utils.h"
 #include "tensorflow/core/tfrt/ifrt/ifrt_restore_tensor_registry.h"
+#include "tensorflow/core/tfrt/ifrt/ifrt_serving_core_selector.h"
 #include "tensorflow/core/tfrt/ifrt/ifrt_tensor_utils.h"
 #include "tensorflow/core/tfrt/ifrt/sharding_utils.h"
 #include "tensorflow/core/tfrt/ifrt/tf_host_callback.h"
 #include "tsl/framework/serving_device_selector.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/statusor.h"
+#include "tsl/platform/threadpool.h"
 #include "tsl/platform/tstring.h"
+#include "tfrt/host_context/concurrent_work_queue.h"  // from @tf_runtime
 
 namespace tensorflow {
 namespace ifrt_serving {
@@ -150,6 +154,30 @@ absl::StatusOr<std::vector<xla::ifrt::Device*>> GetAssignedDevices(
 }
 
 }  // namespace
+
+absl::StatusOr<std::unique_ptr<IfrtServingExecutable>>
+IfrtServingExecutable::Create(
+    int64_t program_id, absl::string_view model_name,
+    absl::string_view signature_name, mlir::OwningOpRef<mlir::ModuleOp> module,
+    std::shared_ptr<xla::ifrt::Client> client,
+    const tsl::thread::ThreadPool* thread_pool,
+    IfrtLoadedVariableRegistry* ifrt_loaded_variable_registry,
+    const IfrtRestoreTensorRegistry* ifrt_restore,
+    tfrt::ConcurrentWorkQueue* checkpoint_loader_queue,
+    tensorflow::StaticDeviceMgr* device_mgr,
+    tensorflow::XlaHelpers::ShapeRepresentationFn shape_representation_fn,
+    IfrtServingCoreSelector* ifrt_serving_core_selector) {
+  TF_ASSIGN_OR_RETURN(
+      tensorflow::tpu::TPUCompileMetadataProto original_compile_metadata,
+      GetCompileMetadata(*module));
+
+  return absl::WrapUnique(new IfrtServingExecutable(
+      program_id, model_name, signature_name, std::move(module),
+      std::move(client), thread_pool, ifrt_loaded_variable_registry,
+      ifrt_restore, checkpoint_loader_queue, device_mgr,
+      std::move(shape_representation_fn), ifrt_serving_core_selector,
+      std::move(original_compile_metadata)));
+}
 
 absl::StatusOr<tsl::RCReference<xla::ifrt::Array>>
 IfrtServingExecutable::ConvertTensorToArray(
@@ -397,6 +425,13 @@ IfrtServingExecutable::LookUpOrCreateExecutable(
       return it->second;
     }
 
+    if (is_frozen_) {
+      xla::ifrt::Future<absl::StatusOr<SharedCachedExecutableBundle>>
+          frozen_future(absl::FailedPreconditionError("Executable is frozen."));
+      executable_bundles_.emplace(key, frozen_future);
+      return frozen_future;
+    }
+
     // Only create promise and future when cache missed.
     promise = xla::ifrt::Future<
         absl::StatusOr<SharedCachedExecutableBundle>>::CreatePromise();
@@ -411,6 +446,13 @@ IfrtServingExecutable::LookUpOrCreateExecutable(
       CreateExecutableSynchronously(compile_metadata, dtypes_and_shapes);
   promise.Set(std::move(executable_bundle));
   return future;
+}
+
+void IfrtServingExecutable::Freeze() {
+  LOG(INFO) << "Freezing executable";
+  absl::MutexLock lock(&mutex_);
+  is_frozen_ = true;
+  module_.release().erase();
 }
 
 bool IfrtServingExecutable::UsePortableExecution(
@@ -456,9 +498,10 @@ absl::StatusOr<std::vector<tensorflow::Tensor>> IfrtServingExecutable::Execute(
                       BuildDtypeAndShape(inputs, variable_arg_indices,
                                          ifrt_restore_tensor_registry_));
 
-  TF_ASSIGN_OR_RETURN(
-      tensorflow::tpu::TPUCompileMetadataProto compile_metadata,
-      GetCompileMetadata(*module_, dtypes_and_shapes, *ifrt_client_));
+  tensorflow::tpu::TPUCompileMetadataProto compile_metadata =
+      original_compile_metadata_;
+  TF_RETURN_IF_ERROR(UpdateCompileMetadata(compile_metadata, dtypes_and_shapes,
+                                           *ifrt_client_));
 
   // `device_reservation` should be alive before the end of the execution.
   tsl::DeviceReservation device_reservation(kNoCoreSelectedIndex, nullptr);

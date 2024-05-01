@@ -61,30 +61,18 @@ namespace ifrt_serving {
 
 class IfrtServingExecutable {
  public:
-  IfrtServingExecutable(
+  static absl::StatusOr<std::unique_ptr<IfrtServingExecutable>> Create(
       int64_t program_id, absl::string_view model_name,
       absl::string_view signature_name,
       mlir::OwningOpRef<mlir::ModuleOp> module,
       std::shared_ptr<xla::ifrt::Client> client,
       const tsl::thread::ThreadPool* thread_pool,
       IfrtLoadedVariableRegistry* ifrt_loaded_variable_registry,
-      const IfrtRestoreTensorRegistry* ifrt_restore_tensor_registry,
+      const IfrtRestoreTensorRegistry* ifrt_restore,
       tfrt::ConcurrentWorkQueue* checkpoint_loader_queue,
       tensorflow::StaticDeviceMgr* device_mgr,
       tensorflow::XlaHelpers::ShapeRepresentationFn shape_representation_fn,
-      IfrtServingCoreSelector* ifrt_serving_core_selector)
-      : program_id_(program_id),
-        model_name_(std::string(model_name)),
-        signature_name_(std::string(signature_name)),
-        module_(std::move(module)),
-        ifrt_client_(std::move(client)),
-        thread_pool_(*thread_pool),
-        ifrt_loaded_variable_registry_(*ifrt_loaded_variable_registry),
-        ifrt_restore_tensor_registry_(*ifrt_restore_tensor_registry),
-        checkpoint_loader_queue_(checkpoint_loader_queue),
-        device_mgr_(device_mgr),
-        shape_representation_fn_(std::move(shape_representation_fn)),
-        ifrt_serving_core_selector_(std::move(ifrt_serving_core_selector)) {}
+      IfrtServingCoreSelector* ifrt_serving_core_selector);
 
   // Movable but not copyable.
   IfrtServingExecutable(IfrtServingExecutable&& other) = default;
@@ -100,6 +88,10 @@ class IfrtServingExecutable {
   absl::StatusOr<std::vector<tensorflow::Tensor>> Execute(
       absl::Span<const tensorflow::Tensor> inputs,
       absl::Span<const int> variable_arg_indices);
+
+  // Freezes the model. After the Freeze(), JIT compile is not supported and
+  // Execute() will return error if inputs contain uncompiled shapes.
+  void Freeze();
 
   int num_executables() const {
     absl::MutexLock lock(&mutex_);
@@ -139,6 +131,33 @@ class IfrtServingExecutable {
         delete;
   };
 
+  IfrtServingExecutable(
+      int64_t program_id, absl::string_view model_name,
+      absl::string_view signature_name,
+      mlir::OwningOpRef<mlir::ModuleOp> module,
+      std::shared_ptr<xla::ifrt::Client> client,
+      const tsl::thread::ThreadPool* thread_pool,
+      IfrtLoadedVariableRegistry* ifrt_loaded_variable_registry,
+      const IfrtRestoreTensorRegistry* ifrt_restore_tensor_registry,
+      tfrt::ConcurrentWorkQueue* checkpoint_loader_queue,
+      tensorflow::StaticDeviceMgr* device_mgr,
+      tensorflow::XlaHelpers::ShapeRepresentationFn shape_representation_fn,
+      IfrtServingCoreSelector* ifrt_serving_core_selector,
+      tensorflow::tpu::TPUCompileMetadataProto original_compile_metadata)
+      : program_id_(program_id),
+        model_name_(std::string(model_name)),
+        signature_name_(std::string(signature_name)),
+        module_(std::move(module)),
+        original_compile_metadata_(std::move(original_compile_metadata)),
+        ifrt_client_(std::move(client)),
+        thread_pool_(*thread_pool),
+        ifrt_loaded_variable_registry_(*ifrt_loaded_variable_registry),
+        ifrt_restore_tensor_registry_(*ifrt_restore_tensor_registry),
+        checkpoint_loader_queue_(checkpoint_loader_queue),
+        device_mgr_(device_mgr),
+        shape_representation_fn_(std::move(shape_representation_fn)),
+        ifrt_serving_core_selector_(std::move(ifrt_serving_core_selector)) {}
+
   int64_t program_id_;
   using SharedCachedExecutableBundle = std::shared_ptr<CachedExecutableBundle>;
 
@@ -146,6 +165,7 @@ class IfrtServingExecutable {
   std::string signature_name_;
 
   mlir::OwningOpRef<mlir::ModuleOp> module_;
+  tensorflow::tpu::TPUCompileMetadataProto original_compile_metadata_;
 
   std::shared_ptr<xla::ifrt::Client> ifrt_client_;
   const tsl::thread::ThreadPool& thread_pool_;
@@ -161,6 +181,8 @@ class IfrtServingExecutable {
   absl::flat_hash_map<
       Key, xla::ifrt::Future<absl::StatusOr<SharedCachedExecutableBundle>>>
       executable_bundles_ ABSL_GUARDED_BY(mutex_);
+
+  bool is_frozen_ ABSL_GUARDED_BY(mutex_) = false;
 
   // Asynchronously load the restored variable tensors to Ifrt array.
   absl::Status AsyncLoadIfrtArray(
