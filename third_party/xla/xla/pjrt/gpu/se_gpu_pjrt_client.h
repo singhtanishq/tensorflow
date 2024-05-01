@@ -16,6 +16,7 @@ limitations under the License.
 #ifndef XLA_PJRT_GPU_SE_GPU_PJRT_CLIENT_H_
 #define XLA_PJRT_GPU_SE_GPU_PJRT_CLIENT_H_
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -49,27 +50,31 @@ class StreamExecutorGpuTopologyDescription : public PjRtTopologyDescription {
   static StreamExecutorGpuTopologyDescription Create(
       const PjRtPlatformId platform_id, const absl::string_view platform_name,
       const absl::string_view platform_version,
-      const std::vector<PjRtDevice*>& devices) {
+      const std::vector<PjRtDevice*>& devices, int32_t num_slices,
+      int32_t num_hosts_per_slice, int32_t num_devices_per_host) {
     std::vector<int> device_ids;
     device_ids.reserve(devices.size());
     for (PjRtDevice* device : devices) {
       device_ids.push_back(device->id());
     }
-    return StreamExecutorGpuTopologyDescription(platform_id, platform_name,
-                                                platform_version, device_ids);
+    return StreamExecutorGpuTopologyDescription(
+        platform_id, platform_name, platform_version, device_ids, num_slices,
+        num_hosts_per_slice, num_devices_per_host);
   }
   // `gpu_device_ids` is the list of logical device ids for the GPU devices and
   // will be used to initialize the GPU topology.
   StreamExecutorGpuTopologyDescription(
       const PjRtPlatformId platform_id, const absl::string_view platform_name,
       const absl::string_view platform_version,
-      const std::vector<int>& gpu_device_ids,
+      const std::vector<int>& gpu_device_ids, int32_t num_slices,
+      int32_t num_hosts_per_slice, int32_t num_devices_per_host,
       const absl::flat_hash_map<std::string, PjRtDeviceAttribute>& attributes =
           {})
       : platform_id_(platform_id),
         platform_name_(platform_name),
         platform_version_(platform_version),
-        gpu_topology_(gpu_device_ids, platform_version),
+        gpu_topology_(gpu_device_ids, platform_version, num_slices,
+                      num_hosts_per_slice, num_devices_per_host),
         attributes_(attributes) {}
 
   bool operator==(const StreamExecutorGpuTopologyDescription& other) const {
@@ -175,7 +180,9 @@ class StreamExecutorGpuClient : public xla::PjRtStreamExecutorClient {
   StreamExecutorGpuClient(
       std::string platform_name, LocalClient* client,
       std::vector<std::unique_ptr<PjRtStreamExecutorDevice>> devices,
-      int process_index, std::unique_ptr<se::DeviceMemoryAllocator> allocator,
+      int process_index, int32_t num_slices, int32_t num_hosts_per_slice,
+      int32_t num_devices_per_host,
+      std::unique_ptr<se::DeviceMemoryAllocator> allocator,
       std::unique_ptr<tsl::Allocator> host_memory_allocator,
       bool should_stage_host_to_device_transfers,
       std::unique_ptr<gpu::GpuExecutableRunOptions> gpu_run_options)
@@ -185,7 +192,8 @@ class StreamExecutorGpuClient : public xla::PjRtStreamExecutorClient {
             should_stage_host_to_device_transfers, std::move(gpu_run_options)),
         topology_(xla::StreamExecutorGpuTopologyDescription::Create(
             tsl::Fingerprint64(platform_name), platform_name,
-            devices_.back()->device_kind(), devices_)) {}
+            devices_.back()->device_kind(), devices_, num_slices,
+            num_hosts_per_slice, num_devices_per_host)) {}
 
   absl::StatusOr<xla::DeviceAssignment> GetDefaultDeviceAssignment(
       int num_replicas, int num_partitions) const override;

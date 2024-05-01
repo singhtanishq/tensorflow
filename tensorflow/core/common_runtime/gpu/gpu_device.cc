@@ -1924,7 +1924,9 @@ Status BaseGPUDeviceFactory::CreateDevices(
       std::unique_ptr<xla::PjRtClient> pjrt_client =
           std::make_unique<xla::StreamExecutorGpuClient>(
               platform_name, xla_client, std::move(pjrt_devices),
-              /*process_index=*/numa_node,
+              /*process_index=*/numa_node, /*num_slices=*/1,
+              /*num_hosts_per_slice=*/1,
+              /*num_devices_per_host=*/xla_client->device_count(),
               /*allocator=*/std::move(allocator_adapter),
               /*host_memory_allocator=*/std::move(pjrt_gpu_host_allocator),
               /*should_stage_host_to_device_transfers=*/true,

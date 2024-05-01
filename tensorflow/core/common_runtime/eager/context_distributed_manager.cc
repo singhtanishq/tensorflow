@@ -354,7 +354,9 @@ absl::Status CreateClientOnce(
     std::unique_ptr<xla::PjRtClient> pjrt_client =
         std::make_unique<xla::StreamExecutorGpuClient>(
             platform_name, info->local_client, std::move(pjrt_devices),
-            /*process_index=*/node_id,
+            /*process_index=*/node_id, /*num_slices=*/num_nodes,
+            /*num_hosts_per_slice=*/1,
+            /*num_devices_per_host=*/info->local_client->device_count(),
             /*allocator=*/std::move(info->allocator),
             /*host_memory_allocator=*/std::move(info->host_memory_allocator),
             /*should_stage_host_to_device_transfers=*/true,

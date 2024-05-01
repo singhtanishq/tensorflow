@@ -1106,6 +1106,7 @@ absl::StatusOr<std::unique_ptr<PjRtClient>> GetStreamExecutorGpuClient(
 
   return std::unique_ptr<PjRtClient>(std::make_unique<StreamExecutorGpuClient>(
       pjrt_platform_name, xla_client, std::move(devices), options.node_id,
+      options.num_nodes, /*num_hosts_per_slice=*/1, xla_client->device_count(),
       std::move(allocator), std::move(host_memory_allocator),
       options.should_stage_host_to_device_transfers,
       std::move(gpu_run_options)));
