@@ -802,6 +802,8 @@ class IteratorContext {
     // checkpoint. This is set by globally shuffled iterators so that upstream
     // iterators can restore the element counts in the random access mode.
     std::optional<size_t> restored_element_count = std::nullopt;
+
+    std::optional<size_t> element_count = std::nullopt;
   };
 
   explicit IteratorContext(IteratorContext* ctx)
@@ -895,6 +897,8 @@ class IteratorContext {
   std::optional<int64_t> restored_element_count() const {
     return params_.restored_element_count;
   }
+
+  std::optional<int64_t> element_count() const { return params_.element_count; }
 
   void SetModel(std::shared_ptr<model::Model> model) { params_.model = model; }
 
