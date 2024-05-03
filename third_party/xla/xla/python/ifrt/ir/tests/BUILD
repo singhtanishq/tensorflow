@@ -40,6 +40,7 @@ cc_binary(
     srcs = ["ifrt-opt.cc"],
     deps = [
         "//xla/mlir_hlo:hlo_dialect_registration",
+        "//xla/python/ifrt",  # buildcleaner: keep
         "//xla/python/ifrt/ir",
         "//xla/python/ifrt/ir/transforms:built_in_spmd_expansions",
         "//xla/python/ifrt/ir/transforms:passes",
