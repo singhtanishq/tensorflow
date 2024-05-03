@@ -15,16 +15,29 @@ limitations under the License.
 
 #include "xla/hlo/ir/backend_config.h"
 
+#include <memory>
 #include <string>
 #include <utility>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/synchronization/mutex.h"
+#include "xla/util.h"
 #include "tsl/platform/errors.h"
 #include "tsl/platform/human_readable_json.h"
 #include "tsl/platform/protobuf.h"
 
 namespace xla {
+
+std::unique_ptr<tsl::protobuf::Message> CloneBackendConfigProto(
+    const tsl::protobuf::Message* proto) {
+  if (proto == nullptr) {
+    return nullptr;
+  }
+  std::unique_ptr<tsl::protobuf::Message> result(proto->New());
+  result->CopyFrom(*proto);
+  return result;
+}
 
 absl::StatusOr<std::string> BackendConfigToRawString(
     const tsl::protobuf::Message& proto) {
@@ -38,56 +51,56 @@ absl::StatusOr<std::string> BackendConfigToRawString(
   return ret;
 }
 
-const std::string& BackendConfigWrapper::GetRawString() const {
-  absl::WriterMutexLock lock{&mutex_};
+const std::string& BackendConfigWrapper::GetRawStringWithoutMutex() const {
   if (proto_ && raw_string_.empty()) {
+    // Cache the raw string.
     raw_string_ = BackendConfigToRawString(*proto_).value();
   }
   return raw_string_;
 }
 
-BackendConfigWrapper BackendConfigWrapper::Clone() const {
-  // Prefer cloning protobuf, raw_string_ will be lazily generated if accessed.
-  BackendConfigWrapper cloned;
-  if (auto* proto = GetProtoPtr()) {
-    cloned.SetProto(*proto);
-  } else {
-    absl::MutexLock source_lock{&mutex_};
-    absl::MutexLock target_lock{&cloned.mutex_};
-    cloned.raw_string_ = raw_string_;
-  }
-  return cloned;
-}
+absl::Status BackendConfigWrapper::GetProto(
+    tsl::protobuf::Message* output_proto) const {
+  output_proto->Clear();
 
-BackendConfigWrapper& BackendConfigWrapper::operator=(std::string raw_string) {
-  absl::MutexLock lock{&mutex_};
-  raw_string_ = std::move(raw_string);
-  proto_.reset();
-  return *this;
+  absl::WriterMutexLock lock{&mutex_};
+  if (proto_ != nullptr) {
+    if (proto_->GetDescriptor() != output_proto->GetDescriptor()) {
+      return Internal("Mismatched backend config descriptors.");
+    }
+    output_proto->CopyFrom(*proto_);
+    return absl::OkStatus();
+  }
+
+  // Empty string does not parse as valid JSON, but it's a valid backend config,
+  // corresponding to the empty proto.
+  if (raw_string_.empty()) {
+    return absl::OkStatus();
+  }
+  TF_RETURN_IF_ERROR(tsl::HumanReadableJsonToProto(raw_string_, output_proto));
+  // Cache the proto into the empty proto_.
+  proto_ = CloneBackendConfigProto(output_proto);
+  return absl::OkStatus();
 }
 
 BackendConfigWrapper& BackendConfigWrapper::operator=(
-    const tsl::protobuf::Message& proto) {
-  SetProto(proto);
-  absl::MutexLock lock{&mutex_};
-  raw_string_.clear();
+    BackendConfigWrapper&& other) {
+  absl::MutexLock other_lock{&other.mutex_};
+  absl::MutexLock this_lock{&mutex_};
+  proto_ = std::move(other.proto_);
+  raw_string_ = std::move(other.raw_string_);
   return *this;
 }
 
-void BackendConfigWrapper::SetProto(const tsl::protobuf::Message& proto) {
-  proto_.reset(proto.New());
-  proto_->CopyFrom(proto);
-}
-
 bool BackendConfigWrapper::operator==(const BackendConfigWrapper& other) const {
-  auto* proto_a = GetProtoPtr();
-  auto* proto_b = other.GetProtoPtr();
-  if (proto_a != nullptr && proto_b != nullptr) {
+  absl::MutexLock other_lock{&other.mutex_};
+  absl::MutexLock this_lock{&mutex_};
+  if (proto_ != nullptr && other.proto_ != nullptr) {
     using ::tsl::protobuf::util::MessageDifferencer;
-    return MessageDifferencer::Equals(*proto_a, *proto_b);
+    return MessageDifferencer::Equals(*proto_, *other.proto_);
   }
   // TODO(b/225956414): Consider canonicalizing raw string form.
-  return GetRawString() == other.GetRawString();
+  return GetRawStringWithoutMutex() == other.GetRawStringWithoutMutex();
 }
 
 }  // namespace xla

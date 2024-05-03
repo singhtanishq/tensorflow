@@ -118,12 +118,28 @@ cc_library(
     srcs = ["backend_config.cc"],
     hdrs = ["backend_config.h"],
     deps = [
+        "//xla:util",
         "@com_google_absl//absl/base:core_headers",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/synchronization",
         "@local_tsl//tsl/platform:errors",
         "@local_tsl//tsl/platform:human_readable_json",
         "@local_tsl//tsl/platform:protobuf",
+    ],
+)
+
+cc_test(
+    name = "backend_config_test",
+    srcs = ["backend_config_test.cc"],
+    deps = [
+        ":backend_config",
+        "//xla/service/gpu:backend_configs_cc_impl",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_absl//absl/synchronization",
+        "@local_tsl//tsl/lib/core:status_test_util",
+        "@local_tsl//tsl/platform:test",
+        "@local_tsl//tsl/platform:test_main",
     ],
 )
 
