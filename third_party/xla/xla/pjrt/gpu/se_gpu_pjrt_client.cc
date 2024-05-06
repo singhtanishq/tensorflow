@@ -693,13 +693,6 @@ StreamExecutorGpuClient::DeserializeExecutable(
         "StreamExecutorGpuClient::DeserializeExecutable proto too large "
         "(>2GB)");
   }
-#if GOOGLE_CUDA || TENSORFLOW_USE_ROCM
-  StreamExecutorExecutableProto proto;
-  if (proto.ParseFromArray(serialized.data(), serialized.size())) {
-    TF_ASSIGN_OR_RETURN(auto se_executable, FromProto(proto));
-    return Load(std::move(se_executable));
-  }
-#endif
   return PjRtStreamExecutorClient::DeserializeExecutable(serialized, options);
 }
 
