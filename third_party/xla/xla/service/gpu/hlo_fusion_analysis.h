@@ -21,6 +21,7 @@ limitations under the License.
 #include <optional>
 #include <vector>
 
+#include "absl/container/inlined_vector.h"
 #include "absl/log/check.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
@@ -65,6 +66,19 @@ class HloFusionAnalysis {
   const std::vector<const HloInstruction*>& fusion_roots() const {
     return fusion_roots_;
   }
+
+  // TODO(b/336597139): Merge with fusion_roots() and only return
+  // HloInstructionAdaptor. This function is added temporarily to make
+  // transition easier and avoid breaking the existing code.
+  absl::InlinedVector<HloInstructionAdaptor, 2> fusion_root_adaptors() const {
+    absl::InlinedVector<HloInstructionAdaptor, 2> adaptors;
+    adaptors.reserve(fusion_roots_.size());
+    for (const HloInstruction* root : fusion_roots_) {
+      adaptors.push_back(HloInstructionAdaptor(*root, fusion_.get()));
+    }
+    return adaptors;
+  }
+
   HloInstructionAdaptor fusion_root(int64_t i) const {
     return HloInstructionAdaptor(*fusion_roots_[i], fusion_.get());
   }
