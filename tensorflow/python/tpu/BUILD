@@ -170,6 +170,19 @@ pytype_strict_library(
     ],
 )
 
+tf_python_pybind_extension(
+    name = "pywrap_sparse_core_layout",
+    srcs = ["pywrap_sparse_core_layout.cc"],
+    visibility = ["//visibility:private"],
+    deps = [
+        "//tensorflow/core/tpu/kernels:sparse_core_layout",
+        "//tensorflow/core/tpu/kernels:sparse_core_layout_proto_cc",
+        "@pybind11",
+        "@pybind11_abseil//pybind11_abseil:status_casters",
+        "@pybind11_protobuf//pybind11_protobuf:native_proto_caster",
+    ],
+)
+
 py_strict_library(
     name = "tpu_replication",
     srcs = ["tpu_replication.py"],
